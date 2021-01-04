@@ -19,7 +19,7 @@ default_args = {
     "depends_on_past": False,
     "email_on_failure": False,
     "email_on_retry": False,
-    "email": "axel.sirota@gmail.com",
+    "email": "ecowfred@gmail.com",
     "retries": 1,
     "retry_delay": timedelta(minutes=5)
 }
@@ -62,7 +62,15 @@ with DAG(dag_id="invoices_dag",
          default_args=default_args,
          template_searchpath=[f"{os.environ['AIRFLOW_HOME']}"],
          catchup=False) as dag:
+
+    #-----------  TASKS ------------#
+
+    #---- TASK 1 ----#
     # This file could come in S3 from our ecommerce application
+    # Check if the file is available, using FileSensor
+    # Check every 5 seconds if file exists, then continue with the DAG.
+    # filepath is the file name, but we use a connection to tell airflow which directory the file is.
+    # On airflow UI, we click on data_path connector, 'Extra' field is the path: 'data'  i.e data/ directory
     is_new_data_available = FileSensor(
         task_id="is_new_data_available",
         fs_conn_id="data_path",
@@ -70,12 +78,12 @@ with DAG(dag_id="invoices_dag",
         poke_interval=5,
         timeout=20
     )
-
+    #---- TASK 2 ----#
     transform_data = PythonOperator(
         task_id="transform_data",
         python_callable=transform_data
     )
-
+    #Create table if it doesn't exist
     create_table = PostgresOperator(
         task_id="create_table",
         sql='''CREATE TABLE IF NOT EXISTS invoices (
@@ -89,12 +97,13 @@ with DAG(dag_id="invoices_dag",
         postgres_conn_id='postgres',
         database='pluralsight'
     )
-
+    #---- TASK 3 ----#
     save_into_db = PythonOperator(
         task_id='save_into_db',
         python_callable=store_in_db
     )
-
+    #---- TASK 4 ----#
+    #You can also use a sql file instead of a query string
     create_report = PostgresOperator(
         task_id="create_report",
         sql=['exec_report.sql'],
@@ -102,7 +111,7 @@ with DAG(dag_id="invoices_dag",
         database='pluralsight',
         autocommit=True
     )
-
+    #---- TASK 5 ----#
     notify_data_science_team = SlackWebhookOperator(
         task_id='notify_data_science_team',
         http_conn_id='slack_conn',
@@ -118,7 +127,8 @@ with DAG(dag_id="invoices_dag",
     )
 
     # Now could come an upload to S3 of the model or a deploy step
-
+    #------------ SPECIFY DEPENDENCIES -----------#
+    # A >> B means B will depend on A
     is_new_data_available >> transform_data
     transform_data >> create_table >> save_into_db
     save_into_db >> notify_data_science_team
